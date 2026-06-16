@@ -1,0 +1,72 @@
+{{ define "title" }}Toyota Vehicle Dashboard{{ end }}
+{{ define "dashboard" }}
+{{ template "base" . }}
+{{ end }}
+{{ define "content" }}
+<section class="hero">
+  <h1>Toyota Vehicle Dashboard</h1>
+  <p>Cached Smartcar data only on page load. Refreshes happen only when you ask for them.</p>
+  <div class="actions">
+    <form method="post" action="/refresh">
+      <button type="submit">Refresh All Vehicles</button>
+    </form>
+    <a class="button secondary" href="/version">Version</a>
+  </div>
+</section>
+
+{{ if .Error }}
+<div class="banner">{{ .Error }}</div>
+{{ end }}
+
+{{ if .Vehicles }}
+<section class="vehicle-grid">
+  {{ range .Vehicles }}
+  <article class="panel">
+    <div class="vehicle-header">
+      <div>
+        <h2 style="margin:0 0 8px;"><a href="/vehicles/{{ .VehicleID }}">{{ .Title }}</a></h2>
+        <div class="meta">Vehicle ID: {{ .VehicleID }}</div>
+      </div>
+      <form method="post" action="/vehicles/{{ .VehicleID }}/refresh">
+        <button type="submit" class="secondary">Refresh</button>
+      </form>
+    </div>
+
+    {{ if .Error }}
+    <div class="banner">{{ .Error }}</div>
+    {{ end }}
+
+    <p class="meta">
+      <span class="pill">{{ .Powertrain }}</span>
+      <span class="pill">{{ .Mode }}</span>
+      {{ if .RefreshedAt }}Last refresh: {{ .RefreshedAt }}{{ end }}
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>State</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Signals }}
+        <tr>
+          <td>{{ .Name }}</td>
+          <td class="state-{{ .State }}">{{ .State }}</td>
+          <td>{{ if .Value }}{{ .Value }}{{ else }}<span class="meta">No value</span>{{ end }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </article>
+  {{ end }}
+</section>
+{{ else }}
+<section class="panel">
+  <h2 style="margin-top:0;">No cached vehicle data yet</h2>
+  <p class="meta">Use the refresh button to fetch the latest Toyota vehicle information from Smartcar.</p>
+</section>
+{{ end }}
+{{ end }}

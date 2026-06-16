@@ -1,0 +1,59 @@
+version: 2
+project_name: smartcar-4runner
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: smartcar-4runner
+    main: ./cmd/smartcar-4runner
+    binary: smartcar-4runner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+
+dockers_v2:
+  - id: smartcar-4runner
+    dockerfile: Dockerfile.scratch
+    ids:
+      - smartcar-4runner
+    images:
+      - ghcr.io/{{ .Env.IMAGE_OWNER }}/smartcar-4runner
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: smartcar-4runner
+      org.opencontainers.image.description: Local Go dashboard for manual Smartcar refreshes
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Version }}"

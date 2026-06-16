@@ -1,0 +1,14 @@
+{{ define "title" }}Error{{ end }}
+{{ define "error" }}
+{{ template "base" . }}
+{{ end }}
+{{ define "content" }}
+<section class="hero">
+  <h1>Error</h1>
+  <p>Status {{ .Status }}</p>
+</section>
+<section class="panel">
+  <p>{{ .Message }}</p>
+  <a class="button secondary" href="/">Back to Dashboard</a>
+</section>
+{{ end }}

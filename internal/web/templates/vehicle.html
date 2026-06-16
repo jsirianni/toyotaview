@@ -1,0 +1,61 @@
+{{ define "title" }}{{ .Title }}{{ end }}
+{{ define "vehicle" }}
+{{ template "base" . }}
+{{ end }}
+{{ define "content" }}
+<section class="hero">
+  <h1>{{ .Title }}</h1>
+  <p>Vehicle ID: {{ .VehicleID }}</p>
+  <div class="actions">
+    <form method="post" action="/vehicles/{{ .VehicleID }}/refresh">
+      <button type="submit">Refresh This Vehicle</button>
+    </form>
+    <a class="button secondary" href="/">Back to Dashboard</a>
+  </div>
+</section>
+
+{{ if .Error }}
+<div class="banner">{{ .Error }}</div>
+{{ end }}
+
+<section class="panel">
+  <p class="meta">
+    <span class="pill">{{ .Powertrain }}</span>
+    <span class="pill">{{ .Mode }}</span>
+    {{ if .RefreshedAt }}Last refresh: {{ .RefreshedAt }}{{ end }}
+    {{ if .Partial }}<span class="pill">Partial</span>{{ end }}
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Signal</th>
+        <th>State</th>
+        <th>Value</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Signals }}
+      <tr>
+        <td>
+          <strong>{{ .Name }}</strong><br>
+          <span class="meta">{{ .Code }}</span>
+        </td>
+        <td class="state-{{ .State }}">
+          {{ .State }}
+          {{ if .Error }}<div class="meta">{{ .Error }}</div>{{ end }}
+        </td>
+        <td>
+          {{ if .Value }}{{ .Value }}{{ else }}<span class="meta">No value</span>{{ end }}
+          {{ if .Body }}<pre>{{ .Body }}</pre>{{ end }}
+        </td>
+        <td>
+          {{ if .UpdatedAt }}{{ .UpdatedAt }}{{ else }}<span class="meta">Unknown</span>{{ end }}
+        </td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+{{ end }}

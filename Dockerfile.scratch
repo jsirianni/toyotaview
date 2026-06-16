@@ -1,0 +1,16 @@
+FROM alpine:3.22 AS certs
+RUN apk --no-cache add ca-certificates \
+    && addgroup -S app \
+    && adduser -S -G app -u 65532 app \
+    && mkdir -p /data \
+    && chown -R 65532:65532 /data
+
+FROM scratch
+ARG TARGETPLATFORM
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=certs /etc/passwd /etc/passwd
+COPY --from=certs --chown=65532:65532 /data /data
+COPY ${TARGETPLATFORM}/smartcar-4runner /usr/bin/smartcar-4runner
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/smartcar-4runner"]

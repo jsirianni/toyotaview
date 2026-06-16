@@ -1,0 +1,142 @@
+{{ define "base" }}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ block "title" . }}Toyota Vehicle Dashboard{{ end }}</title>
+  <style>
+    :root {
+      --bg: #f6f2e8;
+      --panel: #fffdf8;
+      --ink: #1f2a2e;
+      --muted: #5f6b70;
+      --accent: #b8402a;
+      --accent-soft: #f3d7d0;
+      --line: #e2d7c6;
+      --ok: #1f7a4c;
+      --warn: #966200;
+      --error: #9f2d20;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at top left, #fff8ef 0, #f6f2e8 42%, #efe6d7 100%);
+      color: var(--ink);
+    }
+    a { color: inherit; }
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      background: linear-gradient(140deg, rgba(184,64,42,0.14), rgba(255,255,255,0.85));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .hero h1 { margin: 0 0 8px; font-size: 2rem; }
+    .hero p { margin: 0; color: var(--muted); }
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    button, .button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      padding: 10px 16px;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .button.secondary, button.secondary {
+      background: #233339;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(31, 42, 46, 0.06);
+    }
+    .banner {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      background: var(--accent-soft);
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .vehicle-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .vehicle-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #f2ebe0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-right: 8px;
+    }
+    .state-ok { color: var(--ok); }
+    .state-unsupported, .state-unavailable { color: var(--warn); }
+    .state-error { color: var(--error); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-top: 1px solid var(--line);
+      vertical-align: top;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f7f1e7;
+      border-radius: 12px;
+      padding: 10px;
+      margin: 6px 0 0;
+      font-size: 0.85rem;
+    }
+    @media (max-width: 700px) {
+      .shell { padding: 16px; }
+      .hero h1 { font-size: 1.6rem; }
+      table, thead, tbody, th, td, tr { display: block; }
+      thead { display: none; }
+      td { padding-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    {{ block "content" . }}{{ end }}
+  </main>
+</body>
+</html>
+{{ end }}
