@@ -20,7 +20,7 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/smartcar-4runner ./cmd/smartcar-4runner
 
 run:
-	go run ./cmd/smartcar-4runner
+	go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite
 
 snapshot:
 	goreleaser release --snapshot --clean

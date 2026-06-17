@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -9,9 +10,12 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/firefoxx04/toyotaview/internal/app"
+	"github.com/firefoxx04/toyotaview/internal/auth"
 	"github.com/firefoxx04/toyotaview/internal/obs"
+	"github.com/firefoxx04/toyotaview/internal/storage"
 	"github.com/firefoxx04/toyotaview/internal/store"
 	"go.uber.org/zap"
 )
@@ -25,13 +29,24 @@ type VersionInfo struct {
 	Date    string
 }
 
+type Authenticator interface {
+	Signup(ctx context.Context, username string, password string) (auth.SessionResult, error)
+	Login(ctx context.Context, username string, password string) (auth.SessionResult, error)
+	AuthenticateToken(ctx context.Context, token string) (storage.Session, error)
+	Logout(ctx context.Context, token string) error
+}
+
 type Handler struct {
 	provider          app.VehicleProvider
 	store             store.Reader
+	authenticator     Authenticator
+	secureCookies     bool
 	logger            *zap.Logger
 	observer          *obs.Observer
 	dashboardTemplate *template.Template
 	vehicleTemplate   *template.Template
+	loginTemplate     *template.Template
+	signupTemplate    *template.Template
 	errorTemplate     *template.Template
 	version           VersionInfo
 }
@@ -39,10 +54,16 @@ type Handler struct {
 func NewHandler(
 	provider app.VehicleProvider,
 	reader store.Reader,
+	authenticator Authenticator,
+	secureCookies bool,
 	logger *zap.Logger,
 	observer *obs.Observer,
 	version VersionInfo,
 ) (*Handler, error) {
+	if authenticator == nil {
+		return nil, errors.New("authenticator is required")
+	}
+
 	dashboardTemplate, err := template.ParseFS(
 		_templates,
 		"templates/base.html",
@@ -61,6 +82,24 @@ func NewHandler(
 		return nil, fmt.Errorf("parse vehicle templates: %w", err)
 	}
 
+	loginTemplate, err := template.ParseFS(
+		_templates,
+		"templates/base.html",
+		"templates/login.html",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse login templates: %w", err)
+	}
+
+	signupTemplate, err := template.ParseFS(
+		_templates,
+		"templates/base.html",
+		"templates/signup.html",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse signup templates: %w", err)
+	}
+
 	errorTemplate, err := template.ParseFS(
 		_templates,
 		"templates/base.html",
@@ -77,13 +116,110 @@ func NewHandler(
 	return &Handler{
 		provider:          provider,
 		store:             reader,
+		authenticator:     authenticator,
+		secureCookies:     secureCookies,
 		logger:            logger,
 		observer:          observer,
 		dashboardTemplate: dashboardTemplate,
 		vehicleTemplate:   vehicleTemplate,
+		loginTemplate:     loginTemplate,
+		signupTemplate:    signupTemplate,
 		errorTemplate:     errorTemplate,
 		version:           version,
 	}, nil
+}
+
+func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
+	if h.hasValidSession(r) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	page := AuthPage{
+		Title: "Sign in",
+	}
+	if err := h.render(w, http.StatusOK, "login", page); err != nil {
+		h.logger.Error("render login", zap.Error(err))
+	}
+}
+
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		h.renderAuthError(w, http.StatusBadRequest, "login", "Unable to read sign-in form.", "")
+		return
+	}
+
+	username := r.FormValue("username")
+	result, err := h.authenticator.Login(r.Context(), username, r.FormValue("password"))
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			h.renderAuthError(
+				w,
+				http.StatusUnauthorized,
+				"login",
+				"Invalid username or password.",
+				username,
+			)
+			return
+		}
+
+		h.logger.Error("login failed", zap.Error(err))
+		h.renderError(w, r, http.StatusInternalServerError, "Unable to sign in right now.")
+		return
+	}
+
+	h.setSessionCookie(w, r, result.Token, result.Session.ExpiresAt)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (h *Handler) SignupPage(w http.ResponseWriter, r *http.Request) {
+	if h.hasValidSession(r) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	page := AuthPage{
+		Title: "Create account",
+	}
+	if err := h.render(w, http.StatusOK, "signup", page); err != nil {
+		h.logger.Error("render signup", zap.Error(err))
+	}
+}
+
+func (h *Handler) Signup(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		h.renderAuthError(w, http.StatusBadRequest, "signup", "Unable to read signup form.", "")
+		return
+	}
+
+	username := r.FormValue("username")
+	result, err := h.authenticator.Signup(r.Context(), username, r.FormValue("password"))
+	if err != nil {
+		statusCode, message, handled := signupError(err)
+		if handled {
+			h.renderAuthError(w, statusCode, "signup", message, username)
+			return
+		}
+
+		h.logger.Error("signup failed", zap.Error(err))
+		h.renderError(w, r, http.StatusInternalServerError, "Unable to create an account right now.")
+		return
+	}
+
+	h.setSessionCookie(w, r, result.Token, result.Session.ExpiresAt)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(auth.CookieName)
+	if err == nil {
+		if logoutErr := h.authenticator.Logout(r.Context(), cookie.Value); logoutErr != nil {
+			h.logger.Warn("logout failed", zap.Error(logoutErr))
+		}
+	}
+
+	h.clearSessionCookie(w, r)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +338,10 @@ func (h *Handler) render(w http.ResponseWriter, statusCode int, name string, dat
 		tmpl = h.dashboardTemplate
 	case "vehicle":
 		tmpl = h.vehicleTemplate
+	case "login":
+		tmpl = h.loginTemplate
+	case "signup":
+		tmpl = h.signupTemplate
 	case "error":
 		tmpl = h.errorTemplate
 	default:
@@ -218,6 +358,86 @@ func (h *Handler) render(w http.ResponseWriter, statusCode int, name string, dat
 
 	_, err := buffer.WriteTo(w)
 	return err
+}
+
+func (h *Handler) renderAuthError(
+	w http.ResponseWriter,
+	statusCode int,
+	templateName string,
+	message string,
+	username string,
+) {
+	page := AuthPage{
+		Title:    authTitle(templateName),
+		Error:    message,
+		Username: auth.NormalizeUsername(username),
+	}
+	if err := h.render(w, statusCode, templateName, page); err != nil {
+		h.logger.Error("render auth error", zap.String("template", templateName), zap.Error(err))
+		http.Error(w, message, statusCode)
+	}
+}
+
+func (h *Handler) hasValidSession(r *http.Request) bool {
+	cookie, err := r.Cookie(auth.CookieName)
+	if err != nil {
+		return false
+	}
+
+	_, err = h.authenticator.AuthenticateToken(r.Context(), cookie.Value)
+	return err == nil
+}
+
+func (h *Handler) setSessionCookie(
+	w http.ResponseWriter,
+	r *http.Request,
+	token string,
+	expiresAt time.Time,
+) {
+	// #nosec G124 -- loopback HTTP development must work; non-loopback or HTTPS requests set Secure.
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   h.secureCookies || r.TLS != nil,
+	})
+}
+
+func (h *Handler) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	// #nosec G124 -- loopback HTTP development must work; non-loopback or HTTPS requests set Secure.
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   h.secureCookies || r.TLS != nil,
+	})
+}
+
+func signupError(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, auth.ErrUsernameTaken):
+		return http.StatusConflict, "That username is unavailable.", true
+	case errors.Is(err, auth.ErrInvalidUsername):
+		return http.StatusBadRequest, "Username is required and must be 100 bytes or fewer.", true
+	case errors.Is(err, auth.ErrInvalidPassword):
+		return http.StatusBadRequest, "Password is required and must be 72 bytes or fewer.", true
+	default:
+		return 0, "", false
+	}
+}
+
+func authTitle(templateName string) string {
+	if templateName == "signup" {
+		return "Create account"
+	}
+
+	return "Sign in"
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {

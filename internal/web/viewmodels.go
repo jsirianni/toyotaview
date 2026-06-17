@@ -52,6 +52,12 @@ type ErrorPage struct {
 	Message string
 }
 
+type AuthPage struct {
+	Title    string
+	Error    string
+	Username string
+}
+
 func dashboardPage(snapshots []store.VehicleSnapshot, err error) DashboardPage {
 	vehicles := make([]VehiclePage, 0, len(snapshots))
 	for _, snapshot := range snapshots {

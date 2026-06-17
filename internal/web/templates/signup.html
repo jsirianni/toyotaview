@@ -1,0 +1,31 @@
+{{ define "title" }}Create account{{ end }}
+{{ define "signup" }}
+{{ template "base" . }}
+{{ end }}
+{{ define "content" }}
+<section class="hero auth-panel">
+  <h1>Create account</h1>
+  <p>Create a basic username and password for this ToyotaView instance.</p>
+</section>
+
+<section class="panel auth-panel">
+  {{ if .Error }}
+  <div class="banner">{{ .Error }}</div>
+  {{ end }}
+
+  <form method="post" action="/signup">
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" name="username" value="{{ .Username }}" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required>
+    </div>
+    <div class="actions">
+      <button type="submit">Create account</button>
+      <a class="button secondary" href="/login">Sign in instead</a>
+    </div>
+  </form>
+</section>
+{{ end }}

@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/firefoxx04/toyotaview/internal/app"
+	"github.com/firefoxx04/toyotaview/internal/auth"
 	"github.com/firefoxx04/toyotaview/internal/config"
 	"github.com/firefoxx04/toyotaview/internal/devsmartcar"
 	"github.com/firefoxx04/toyotaview/internal/logging"
 	"github.com/firefoxx04/toyotaview/internal/obs"
 	"github.com/firefoxx04/toyotaview/internal/smartcar"
+	"github.com/firefoxx04/toyotaview/internal/storage"
 	"github.com/firefoxx04/toyotaview/internal/store"
 	"github.com/firefoxx04/toyotaview/internal/web"
 	"go.uber.org/zap"
@@ -82,6 +84,33 @@ func run() error {
 		_ = observer.Shutdown(shutdownCtx)
 	}()
 
+	durableStore, err := storage.Open(cfg.Storage)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := durableStore.Close(); closeErr != nil {
+			logger.Warn("close storage", zap.Error(closeErr))
+		}
+	}()
+
+	storageCtx, cancelStorage := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancelStorage()
+	if err := durableStore.Ping(storageCtx); err != nil {
+		return err
+	}
+
+	if shouldMigrateStorage(cfg) {
+		if err := durableStore.Migrate(storageCtx); err != nil {
+			return err
+		}
+	}
+
+	authService, err := auth.NewService(durableStore, cfg.Auth.SessionTTL)
+	if err != nil {
+		return err
+	}
+
 	smartcarClient, err := newSmartcarAPI(cfg, logger, observer)
 	if err != nil {
 		return err
@@ -89,11 +118,19 @@ func run() error {
 
 	memoryStore := store.NewMemoryStore()
 	service := app.NewService(cfg.Smartcar, smartcarClient, memoryStore, logger, observer)
-	handler, err := web.NewHandler(service, memoryStore, logger, observer, web.VersionInfo{
-		Version: version,
-		Commit:  commit,
-		Date:    date,
-	})
+	handler, err := web.NewHandler(
+		service,
+		memoryStore,
+		authService,
+		!cfg.IsLoopback(),
+		logger,
+		observer,
+		web.VersionInfo{
+			Version: version,
+			Commit:  commit,
+			Date:    date,
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -142,6 +179,15 @@ func run() error {
 
 	logger.Info("graceful shutdown complete")
 	return nil
+}
+
+func shouldMigrateStorage(cfg config.Config) bool {
+	if cfg.Storage.Driver == config.StorageDriverSQLite {
+		return true
+	}
+
+	return cfg.Storage.Driver == config.StorageDriverPostgres &&
+		cfg.Storage.Postgres.MigrateOnStart
 }
 
 func newSmartcarAPI(

@@ -25,6 +25,18 @@ func TestLoad_Defaults(t *testing.T) {
 	if len(cfg.Smartcar.SignalCodes) != len(_defaultSignalCodes) {
 		t.Fatalf("SignalCodes len = %d, want %d", len(cfg.Smartcar.SignalCodes), len(_defaultSignalCodes))
 	}
+
+	if cfg.Storage.Driver != StorageDriverSQLite {
+		t.Fatalf("Storage.Driver = %q, want %q", cfg.Storage.Driver, StorageDriverSQLite)
+	}
+
+	if cfg.Storage.SQLite.Path != _defaultSQLitePath {
+		t.Fatalf("SQLite.Path = %q, want %q", cfg.Storage.SQLite.Path, _defaultSQLitePath)
+	}
+
+	if cfg.Auth.SessionTTL != _defaultAuthSessionTTL {
+		t.Fatalf("Auth.SessionTTL = %s, want %s", cfg.Auth.SessionTTL, _defaultAuthSessionTTL)
+	}
 }
 
 func TestLoad_EnvOverridesDefaults(t *testing.T) {
@@ -169,7 +181,9 @@ func TestLoad_DevModeWithoutCredentials(t *testing.T) {
 	t.Parallel()
 
 	cfg, err := Load(nil, map[string]string{
-		"SC4R_DEV_MODE": "true",
+		"SC4R_DEV_MODE":       "true",
+		"SC4R_STORAGE_DRIVER": StorageDriverSQLite,
+		"SC4R_SQLITE_PATH":    ":memory:",
 	})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -190,8 +204,9 @@ func TestLoad_DevModeScenarioOverride(t *testing.T) {
 	cfg, err := Load(
 		[]string{"--dev-scenario", "partial"},
 		map[string]string{
-			"SC4R_DEV_MODE":     "true",
-			"SC4R_DEV_SCENARIO": "happy",
+			"SC4R_DEV_MODE":       "true",
+			"SC4R_DEV_SCENARIO":   "happy",
+			"SC4R_STORAGE_DRIVER": StorageDriverSQLite,
 		},
 	)
 	if err != nil {
@@ -207,8 +222,9 @@ func TestLoad_InvalidDevScenario(t *testing.T) {
 	t.Parallel()
 
 	_, err := Load(nil, map[string]string{
-		"SC4R_DEV_MODE":     "true",
-		"SC4R_DEV_SCENARIO": "nope",
+		"SC4R_DEV_MODE":       "true",
+		"SC4R_DEV_SCENARIO":   "nope",
+		"SC4R_STORAGE_DRIVER": StorageDriverSQLite,
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid dev scenario") {
 		t.Fatalf("Load() error = %v, want invalid dev scenario", err)
@@ -218,7 +234,10 @@ func TestLoad_InvalidDevScenario(t *testing.T) {
 func TestPrintConfigPathLoadsInDevModeWithoutCredentials(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := Load([]string{"--print-config", "--dev-mode"}, map[string]string{})
+	cfg, err := Load(
+		[]string{"--print-config", "--dev-mode", "--storage-driver", StorageDriverSQLite},
+		map[string]string{},
+	)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -272,10 +291,146 @@ func TestDurationDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingStorageDriver(t *testing.T) {
+	t.Parallel()
+
+	env := requiredEnv()
+	delete(env, "SC4R_STORAGE_DRIVER")
+
+	_, err := Load(nil, env)
+	if err == nil || !strings.Contains(err.Error(), "invalid storage driver") {
+		t.Fatalf("Load() error = %v, want invalid storage driver", err)
+	}
+}
+
+func TestLoad_InvalidStorageDriver(t *testing.T) {
+	t.Parallel()
+
+	env := requiredEnv()
+	env["SC4R_STORAGE_DRIVER"] = "memory"
+
+	_, err := Load(nil, env)
+	if err == nil || !strings.Contains(err.Error(), "invalid storage driver") {
+		t.Fatalf("Load() error = %v, want invalid storage driver", err)
+	}
+}
+
+func TestLoad_SQLiteFlags(t *testing.T) {
+	t.Parallel()
+
+	env := requiredEnv()
+	cfg, err := Load(
+		[]string{
+			"--sqlite-path", "local.sqlite3",
+			"--sqlite-wipe-on-start",
+		},
+		env,
+	)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Storage.SQLite.Path != "local.sqlite3" {
+		t.Fatalf("SQLite.Path = %q, want local.sqlite3", cfg.Storage.SQLite.Path)
+	}
+
+	if !cfg.Storage.SQLite.WipeOnStart {
+		t.Fatal("SQLite.WipeOnStart = false, want true")
+	}
+}
+
+func TestLoad_PostgresConfig(t *testing.T) {
+	t.Parallel()
+
+	env := requiredPostgresEnv()
+	cfg, err := Load(nil, env)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Storage.Driver != StorageDriverPostgres {
+		t.Fatalf("Storage.Driver = %q, want %q", cfg.Storage.Driver, StorageDriverPostgres)
+	}
+
+	if cfg.Storage.Postgres.Port != _defaultPostgresPort {
+		t.Fatalf("Postgres.Port = %d, want %d", cfg.Storage.Postgres.Port, _defaultPostgresPort)
+	}
+
+	if cfg.Storage.Postgres.SSLMode != _defaultPostgresSSLMode {
+		t.Fatalf("Postgres.SSLMode = %q, want %q", cfg.Storage.Postgres.SSLMode, _defaultPostgresSSLMode)
+	}
+
+	if !cfg.Storage.Postgres.MigrateOnStart {
+		t.Fatal("Postgres.MigrateOnStart = false, want true")
+	}
+}
+
+func TestLoad_PostgresMissingRequired(t *testing.T) {
+	t.Parallel()
+
+	env := requiredPostgresEnv()
+	delete(env, "SC4R_POSTGRES_PASSWORD")
+
+	_, err := Load(nil, env)
+	if err == nil || !strings.Contains(err.Error(), "postgres password") {
+		t.Fatalf("Load() error = %v, want postgres password error", err)
+	}
+}
+
+func TestLoad_PostgresInvalidPort(t *testing.T) {
+	t.Parallel()
+
+	env := requiredPostgresEnv()
+	env["SC4R_POSTGRES_PORT"] = "70000"
+
+	_, err := Load(nil, env)
+	if err == nil || !strings.Contains(err.Error(), "invalid postgres port") {
+		t.Fatalf("Load() error = %v, want invalid postgres port", err)
+	}
+}
+
+func TestLoad_PostgresInvalidSSLMode(t *testing.T) {
+	t.Parallel()
+
+	env := requiredPostgresEnv()
+	env["SC4R_POSTGRES_SSL_MODE"] = "nope"
+
+	_, err := Load(nil, env)
+	if err == nil || !strings.Contains(err.Error(), "invalid postgres ssl mode") {
+		t.Fatalf("Load() error = %v, want invalid ssl mode", err)
+	}
+}
+
+func TestRedactedPostgresPassword(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := Load(nil, requiredPostgresEnv())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	redacted := cfg.Redacted()
+	if redacted.Storage.Postgres.Password != "****" {
+		t.Fatalf("Postgres.Password = %q, want redacted", redacted.Storage.Postgres.Password)
+	}
+}
+
 func requiredEnv() map[string]string {
 	return map[string]string{
 		"SC4R_SMARTCAR_CLIENT_ID":     "client-123456",
 		"SC4R_SMARTCAR_CLIENT_SECRET": "secret-123456",
 		"SC4R_SMARTCAR_USER_ID":       "user-123456",
+		"SC4R_STORAGE_DRIVER":         StorageDriverSQLite,
 	}
+}
+
+func requiredPostgresEnv() map[string]string {
+	env := requiredEnv()
+	env["SC4R_STORAGE_DRIVER"] = StorageDriverPostgres
+	env["SC4R_POSTGRES_HOST"] = "db.example"
+	env["SC4R_POSTGRES_USER"] = "toyota"
+	env["SC4R_POSTGRES_PASSWORD"] = strings.Repeat("p", 12)
+	env["SC4R_POSTGRES_DATABASE"] = "toyotaview"
+
+	return env
 }

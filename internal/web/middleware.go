@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/firefoxx04/toyotaview/internal/auth"
 )
 
 func SecurityHeaders(next http.Handler) http.Handler {
@@ -39,6 +41,24 @@ func RequireSameOrigin(next http.Handler) http.Handler {
 	})
 }
 
+func (h *Handler) RequireLogin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(auth.CookieName)
+		if err != nil || strings.TrimSpace(cookie.Value) == "" {
+			redirectToLogin(w, r)
+			return
+		}
+
+		if _, err := h.authenticator.AuthenticateToken(r.Context(), cookie.Value); err != nil {
+			h.clearSessionCookie(w, r)
+			redirectToLogin(w, r)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func sameOrigin(r *http.Request, candidate string) bool {
 	if strings.TrimSpace(candidate) == "" {
 		return true
@@ -50,4 +70,8 @@ func sameOrigin(r *http.Request, candidate string) bool {
 	}
 
 	return parsed.Host == r.Host
+}
+
+func redirectToLogin(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

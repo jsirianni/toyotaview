@@ -15,12 +15,21 @@ import (
 
 const (
 	_defaultAddr               = "127.0.0.1:8080"
+	_defaultAuthSessionTTL     = 12 * time.Hour
 	_defaultDevScenario        = "happy"
 	_defaultIAMBaseURL         = "https://iam.smartcar.com"
+	_defaultPostgresPort       = 5432
+	_defaultPostgresSSLMode    = "require"
+	_defaultSQLitePath         = "./toyotaview.sqlite3"
 	_defaultVehicleBaseURL     = "https://vehicle.api.smartcar.com/v3"
 	_defaultUnitSystem         = "imperial"
 	_defaultServiceName        = "smartcar-4runner"
 	_defaultOTELServiceVersion = "dev"
+)
+
+const (
+	StorageDriverPostgres = "postgres"
+	StorageDriverSQLite   = "sqlite"
 )
 
 var _defaultSignalCodes = []string{
@@ -53,11 +62,17 @@ type Config struct {
 	WriteTimeout      time.Duration  `json:"writeTimeout"`
 	IdleTimeout       time.Duration  `json:"idleTimeout"`
 	ShutdownTimeout   time.Duration  `json:"shutdownTimeout"`
+	Auth              AuthConfig     `json:"auth"`
 	Dev               DevConfig      `json:"dev"`
 	PrintConfig       bool           `json:"printConfig"`
 	Smartcar          SmartcarConfig `json:"smartcar"`
+	Storage           StorageConfig  `json:"storage"`
 	Logging           LoggingConfig  `json:"logging"`
 	OTEL              OTELConfig     `json:"otel"`
+}
+
+type AuthConfig struct {
+	SessionTTL time.Duration `json:"sessionTTL"`
 }
 
 type DevConfig struct {
@@ -84,6 +99,27 @@ type SmartcarConfig struct {
 	UnitSystem     string        `json:"unitSystem"`
 	Timeout        time.Duration `json:"timeout"`
 	MaxRetries     int           `json:"maxRetries"`
+}
+
+type StorageConfig struct {
+	Driver   string         `json:"driver"`
+	SQLite   SQLiteConfig   `json:"sqlite"`
+	Postgres PostgresConfig `json:"postgres"`
+}
+
+type SQLiteConfig struct {
+	Path        string `json:"path"`
+	WipeOnStart bool   `json:"wipeOnStart"`
+}
+
+type PostgresConfig struct {
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	User           string `json:"user"`
+	Password       string `json:"password"`
+	Database       string `json:"database"`
+	SSLMode        string `json:"sslMode"`
+	MigrateOnStart bool   `json:"migrateOnStart"`
 }
 
 type LoggingConfig struct {
@@ -138,6 +174,15 @@ func Load(args []string, env map[string]string) (Config, error) {
 	}
 
 	smartcarRetriesDefault, err := intEnvOrDefault(env, "SC4R_SMARTCAR_MAX_RETRIES", 2)
+	if err != nil {
+		return Config{}, err
+	}
+
+	authSessionTTLDefault, err := durationEnvOrDefault(
+		env,
+		"SC4R_AUTH_SESSION_TTL",
+		_defaultAuthSessionTTL,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -209,6 +254,44 @@ func Load(args []string, env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 
+	storageDriverDefault := normalizeStorageDriver(envOrDefault(env, "SC4R_STORAGE_DRIVER", ""))
+	sqlitePathDefault := envOrDefault(env, "SC4R_SQLITE_PATH", _defaultSQLitePath)
+	sqliteWipeOnStartDefault, err := boolEnvOrDefault(
+		env,
+		"SC4R_SQLITE_WIPE_ON_START",
+		false,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+
+	postgresHostDefault := envOrDefault(env, "SC4R_POSTGRES_HOST", "")
+	postgresPortDefault, err := intEnvOrDefault(
+		env,
+		"SC4R_POSTGRES_PORT",
+		_defaultPostgresPort,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+
+	postgresUserDefault := envOrDefault(env, "SC4R_POSTGRES_USER", "")
+	postgresPasswordDefault := envOrDefault(env, "SC4R_POSTGRES_PASSWORD", "")
+	postgresDatabaseDefault := envOrDefault(env, "SC4R_POSTGRES_DATABASE", "")
+	postgresSSLModeDefault := normalizePostgresSSLMode(envOrDefault(
+		env,
+		"SC4R_POSTGRES_SSL_MODE",
+		_defaultPostgresSSLMode,
+	))
+	postgresMigrateOnStartDefault, err := boolEnvOrDefault(
+		env,
+		"SC4R_POSTGRES_MIGRATE_ON_START",
+		true,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+
 	otelEnabledDefault, err := boolEnvOrDefault(env, "SC4R_OTEL_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -253,6 +336,13 @@ func Load(args []string, env map[string]string) (Config, error) {
 	}
 
 	cfg := Config{}
+	fs.DurationVar(
+		&cfg.Auth.SessionTTL,
+		"auth-session-ttl",
+		authSessionTTLDefault,
+		"Authenticated browser session lifetime",
+	)
+
 	fs.StringVar(&cfg.Smartcar.ClientID, "smartcar-client-id", clientIDDefault, "Smartcar client id")
 	fs.StringVar(
 		&cfg.Smartcar.ClientSecret,
@@ -354,6 +444,67 @@ func Load(args []string, env map[string]string) (Config, error) {
 		"Duplicate logs to stdout",
 	)
 
+	fs.StringVar(
+		&cfg.Storage.Driver,
+		"storage-driver",
+		storageDriverDefault,
+		"Durable storage driver: sqlite or postgres",
+	)
+	fs.StringVar(
+		&cfg.Storage.SQLite.Path,
+		"sqlite-path",
+		sqlitePathDefault,
+		"SQLite database path for local development",
+	)
+	fs.BoolVar(
+		&cfg.Storage.SQLite.WipeOnStart,
+		"sqlite-wipe-on-start",
+		sqliteWipeOnStartDefault,
+		"Wipe the SQLite database before startup",
+	)
+	fs.StringVar(
+		&cfg.Storage.Postgres.Host,
+		"postgres-host",
+		postgresHostDefault,
+		"Postgres host",
+	)
+	fs.IntVar(
+		&cfg.Storage.Postgres.Port,
+		"postgres-port",
+		postgresPortDefault,
+		"Postgres port",
+	)
+	fs.StringVar(
+		&cfg.Storage.Postgres.User,
+		"postgres-user",
+		postgresUserDefault,
+		"Postgres user",
+	)
+	fs.StringVar(
+		&cfg.Storage.Postgres.Password,
+		"postgres-password",
+		postgresPasswordDefault,
+		"Postgres password",
+	)
+	fs.StringVar(
+		&cfg.Storage.Postgres.Database,
+		"postgres-database",
+		postgresDatabaseDefault,
+		"Postgres database",
+	)
+	fs.StringVar(
+		&cfg.Storage.Postgres.SSLMode,
+		"postgres-ssl-mode",
+		postgresSSLModeDefault,
+		"Postgres sslmode",
+	)
+	fs.BoolVar(
+		&cfg.Storage.Postgres.MigrateOnStart,
+		"postgres-migrate-on-start",
+		postgresMigrateOnStartDefault,
+		"Run Postgres migrations during startup",
+	)
+
 	fs.BoolVar(&cfg.OTEL.Enabled, "otel-enabled", otelEnabledDefault, "Enable OTEL")
 	fs.StringVar(
 		&cfg.OTEL.ServiceName,
@@ -408,6 +559,8 @@ func Load(args []string, env map[string]string) (Config, error) {
 	cfg.Smartcar.VehicleIDs = parseCSV(*vehicleIDs)
 	cfg.Smartcar.SignalCodes = parseCSV(*signalCodes)
 	cfg.Dev.Scenario = normalizeDevScenario(cfg.Dev.Scenario)
+	cfg.Storage.Driver = normalizeStorageDriver(cfg.Storage.Driver)
+	cfg.Storage.Postgres.SSLMode = normalizePostgresSSLMode(cfg.Storage.Postgres.SSLMode)
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -417,6 +570,10 @@ func Load(args []string, env map[string]string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.Auth.SessionTTL <= 0 {
+		return errors.New("auth session ttl must be greater than zero")
+	}
+
 	if c.Dev.Enabled {
 		if err := validateDevScenario(c.Dev.Scenario); err != nil {
 			return err
@@ -491,6 +648,39 @@ func (c Config) Validate() error {
 		return errors.New("invalid log rotation settings")
 	}
 
+	switch c.Storage.Driver {
+	case StorageDriverSQLite:
+		if strings.TrimSpace(c.Storage.SQLite.Path) == "" {
+			return errors.New("sqlite path is required")
+		}
+	case StorageDriverPostgres:
+		if strings.TrimSpace(c.Storage.Postgres.Host) == "" {
+			return errors.New("postgres host is required")
+		}
+
+		if c.Storage.Postgres.Port <= 0 || c.Storage.Postgres.Port > 65535 {
+			return fmt.Errorf("invalid postgres port %d", c.Storage.Postgres.Port)
+		}
+
+		if strings.TrimSpace(c.Storage.Postgres.User) == "" {
+			return errors.New("postgres user is required")
+		}
+
+		if c.Storage.Postgres.Password == "" {
+			return errors.New("postgres password is required")
+		}
+
+		if strings.TrimSpace(c.Storage.Postgres.Database) == "" {
+			return errors.New("postgres database is required")
+		}
+
+		if err := validatePostgresSSLMode(c.Storage.Postgres.SSLMode); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("invalid storage driver %q", c.Storage.Driver)
+	}
+
 	if c.OTEL.ServiceName == "" {
 		return errors.New("otel service name is required")
 	}
@@ -519,6 +709,7 @@ func (c Config) Redacted() Config {
 	redacted.Smartcar.ClientID = redactValue(redacted.Smartcar.ClientID, 4)
 	redacted.Smartcar.ClientSecret = redactValue(redacted.Smartcar.ClientSecret, 0)
 	redacted.Smartcar.UserID = redactValue(redacted.Smartcar.UserID, 6)
+	redacted.Storage.Postgres.Password = redactValue(redacted.Storage.Postgres.Password, 0)
 
 	return redacted
 }
@@ -564,6 +755,23 @@ func normalizeDevScenario(value string) string {
 	}
 
 	return value
+}
+
+func normalizeStorageDriver(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizePostgresSSLMode(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func validatePostgresSSLMode(value string) error {
+	switch value {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return nil
+	default:
+		return fmt.Errorf("invalid postgres ssl mode %q", value)
+	}
 }
 
 func validateDevScenario(value string) error {

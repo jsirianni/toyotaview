@@ -13,16 +13,18 @@ Primary goals:
 - Keep code easy for humans to review.
 - Let `gofmt`, `goimports`, `go vet`, tests, and linters enforce the mechanical parts.
 
-## Required Checks
+## Required Checks For Go Changes
 
-On every code change, run formatting before verification:
+When a change touches Go source files (`*.go`), run formatting before
+verification:
 
 ```sh
 make fmt
 ```
 
-After formatting, start four concurrent sub agents using `gpt-5.4-mini` with low
-reasoning. Give each sub agent only the repository path and one assigned command:
+After formatting, start four concurrent sub agents using `gpt-5.4-mini` with
+low reasoning. Give each sub agent only the repository path and one assigned
+command:
 
 ```sh
 make test

@@ -4,7 +4,7 @@
 
 ## Security note
 
-This app does not implement user-facing authentication. It binds to `127.0.0.1:8080` by default and is intended for local or otherwise protected environments.
+This app gates the browser dashboard behind local username/password login. Smartcar access is still configured globally for the running instance, so all authenticated users see the same configured vehicle dashboard.
 
 ## What it does
 
@@ -30,11 +30,12 @@ Smartcar API authentication uses the client-credentials flow. This app never sto
 export SC4R_SMARTCAR_CLIENT_ID="..."
 export SC4R_SMARTCAR_CLIENT_SECRET="..."
 export SC4R_SMARTCAR_USER_ID="..."
+export SC4R_STORAGE_DRIVER="sqlite"
 export SC4R_LOG_FILE="./smartcar-4runner.log"
 go run ./cmd/smartcar-4runner
 ```
 
-Then open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+Then open [http://127.0.0.1:8080/signup](http://127.0.0.1:8080/signup) to create a local account.
 
 To inspect the effective configuration without making any network calls:
 
@@ -47,24 +48,24 @@ go run ./cmd/smartcar-4runner --print-config
 Dev mode runs the full web app against a built-in mocked Smartcar backend. You do not need real Smartcar credentials, a `user_id`, or connected vehicles.
 
 ```bash
-go run ./cmd/smartcar-4runner --dev-mode
+go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite
 ```
 
-The dashboard still starts empty on `GET /`. Use the browser refresh actions to populate mocked vehicle data, just like the real app.
+Create a local account at `/signup`. The dashboard still starts empty on `GET /`; use the browser refresh actions to populate mocked vehicle data, just like the real app.
 
 You can switch between built-in mock scenarios:
 
 ```bash
-go run ./cmd/smartcar-4runner --dev-mode --dev-scenario happy
-go run ./cmd/smartcar-4runner --dev-mode --dev-scenario partial
-go run ./cmd/smartcar-4runner --dev-mode --dev-scenario empty
-go run ./cmd/smartcar-4runner --dev-mode --dev-scenario failure
+go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite --dev-scenario happy
+go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite --dev-scenario partial
+go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite --dev-scenario empty
+go run ./cmd/smartcar-4runner --dev-mode --storage-driver sqlite --dev-scenario failure
 ```
 
 You can also scope the mocked dashboard to a single built-in vehicle:
 
 ```bash
-SC4R_DEV_MODE=true SC4R_SMARTCAR_VEHICLE_IDS=dev-4runner go run ./cmd/smartcar-4runner
+SC4R_DEV_MODE=true SC4R_STORAGE_DRIVER=sqlite SC4R_SMARTCAR_VEHICLE_IDS=dev-4runner go run ./cmd/smartcar-4runner
 ```
 
 Built-in mocked vehicle IDs:
@@ -81,6 +82,8 @@ docker run --rm \
   -e SC4R_SMARTCAR_CLIENT_ID="..." \
   -e SC4R_SMARTCAR_CLIENT_SECRET="..." \
   -e SC4R_SMARTCAR_USER_ID="..." \
+  -e SC4R_STORAGE_DRIVER=sqlite \
+  -e SC4R_SQLITE_PATH=/data/toyotaview.sqlite3 \
   -e SC4R_LOG_FILE=/data/smartcar-4runner.log \
   -v smartcar-4runner-data:/data \
   ghcr.io/OWNER/smartcar-4runner:latest
@@ -105,9 +108,12 @@ Flags override environment variables, and environment variables override default
 
 | Flag | Environment variable |
 |---|---|
+| `--storage-driver` | `SC4R_STORAGE_DRIVER` |
 | `--smartcar-client-id` | `SC4R_SMARTCAR_CLIENT_ID` |
 | `--smartcar-client-secret` | `SC4R_SMARTCAR_CLIENT_SECRET` |
 | `--smartcar-user-id` | `SC4R_SMARTCAR_USER_ID` |
+
+Smartcar credentials are not required when `--dev-mode` is enabled.
 
 ### Common optional settings
 
@@ -122,8 +128,13 @@ Flags override environment variables, and environment variables override default
 | `--smartcar-timeout` | `SC4R_SMARTCAR_TIMEOUT` | `20s` |
 | `--log-file` | `SC4R_LOG_FILE` | `./smartcar-4runner.log` |
 | `--log-level` | `SC4R_LOG_LEVEL` | `info` |
+| `--auth-session-ttl` | `SC4R_AUTH_SESSION_TTL` | `12h` |
+| `--sqlite-path` | `SC4R_SQLITE_PATH` | `./toyotaview.sqlite3` |
+| `--sqlite-wipe-on-start` | `SC4R_SQLITE_WIPE_ON_START` | `false` |
 | `--otel-enabled` | `SC4R_OTEL_ENABLED` | `false` |
 | `--otel-endpoint` | `SC4R_OTEL_ENDPOINT` | `localhost:4318` |
+
+For production Postgres storage, set `--storage-driver postgres` plus `--postgres-host`, `--postgres-user`, `--postgres-password`, and `--postgres-database`. Postgres migrations run on startup by default.
 
 Run `go run ./cmd/smartcar-4runner --help` for the full flag list.
 
@@ -150,13 +161,12 @@ go run ./cmd/smartcar-4runner \
 ## Development commands
 
 ```bash
-go test ./...
-go test -race ./...
-go vet ./...
-goimports -w .
-golangci-lint run ./...
-gosec ./...
-goreleaser release --snapshot --clean
+make fmt
+make test
+make vet
+make lint
+make gosec
+make snapshot
 ```
 
 The `Makefile` and `scripts/` directory provide the same commands in shortcut form.
