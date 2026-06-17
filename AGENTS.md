@@ -15,15 +15,31 @@ Primary goals:
 
 ## Required Checks
 
-Before considering Go work complete, run the project-appropriate equivalents of:
+On every code change, run formatting before verification:
 
 ```sh
-go test ./...
-go vet ./...
-goimports -w .
+make fmt
 ```
 
-If the repository uses `golangci-lint`, run it as well.
+After formatting, start four concurrent sub agents using `gpt-5.4-mini` with low
+reasoning. Give each sub agent only the repository path and one assigned command:
+
+```sh
+make test
+make vet
+make lint
+make gosec
+```
+
+Do not pass full conversation history, implementation context, plans, diffs, or
+unrelated instructions to the sub agents. Each sub agent must only run its
+assigned make target and report whether it passed or failed.
+
+Wait for all sub agents to finish. If all checks pass, no failure detail is
+needed. If any check fails, the parent agent must run the failed target itself,
+inspect the output, and decide how to proceed. Fix failures that are in scope
+for the current code change. Prompt the user when the failure is out of scope,
+unrelated, environmental, or requires a product decision.
 
 Recommended baseline linters:
 

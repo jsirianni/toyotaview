@@ -1,12 +1,10 @@
-.PHONY: fmt test race vet lint gosec build run snapshot
+.PHONY: fmt test vet lint gosec build run snapshot
 
 fmt:
 	goimports -w .
 
+test: export CGO_ENABLED=1
 test:
-	go test ./...
-
-race:
 	go test -race ./...
 
 vet:
